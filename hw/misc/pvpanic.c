@@ -46,6 +46,11 @@ static void handle_event(int event)
         qemu_system_guest_pvshutdown();
         return;
     }
+
+    if (event & PVPANIC_REBOOT) {
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+        return;
+    }
 }
 
 /* return supported events on read */
