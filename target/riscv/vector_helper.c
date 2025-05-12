@@ -914,6 +914,7 @@ GEN_VEXT_ST_WHOLE(vs8r_v, int8_t, ste_b_tlb, ste_b_host)
 #define OP_SUS_H int16_t, uint16_t, int16_t, uint16_t, int16_t
 #define OP_SUS_W int32_t, uint32_t, int32_t, uint32_t, int32_t
 #define OP_SUS_D int64_t, uint64_t, int64_t, uint64_t, int64_t
+#define OP_USU_W uint32_t, int32_t, uint32_t, int32_t, int32_t
 #define WOP_SSS_B int16_t, int8_t, int8_t, int16_t, int16_t
 #define WOP_SSS_H int32_t, int16_t, int16_t, int32_t, int32_t
 #define WOP_SSS_W int64_t, int32_t, int32_t, int64_t, int64_t
@@ -1676,6 +1677,129 @@ GEN_VEXT_VV(vmul_vv_b, 1)
 GEN_VEXT_VV(vmul_vv_h, 2)
 GEN_VEXT_VV(vmul_vv_w, 4)
 GEN_VEXT_VV(vmul_vv_d, 8)
+
+typedef void opmvv2_fn(void *vd, void *vs1, void *vs2, int i);
+typedef void opmvx2_fn(void *vd, target_ulong s1, void *vs2, int i);
+
+static inline void do_vext_mvx(void *vd, void *v0, target_ulong rs1, void *vs2,
+                          CPURISCVState *env, uint32_t desc,
+                          opmvx2_fn fn, uint32_t esz)
+{
+    uint32_t vm = vext_vm(desc);
+    uint32_t vl = env->vl;
+    uint32_t total_elems = vext_get_total_elems(env, desc, esz);
+    uint32_t vta = vext_vta(desc);
+    uint32_t vma = vext_vma(desc);
+    uint32_t i;
+
+    VSTART_CHECK_EARLY_EXIT(env, vl);
+
+    for (i = env->vstart; i < vl; i++) {
+        if (!vm && !vext_elem_mask(v0, i)) {
+            /* set masked-off elements to 1s */
+            vext_set_elems_1s(vd, vma, i * esz, (i + 1) * esz);
+            continue;
+        }
+        fn(vd, rs1, vs2, i);
+    }
+    env->vstart = 0;
+    /* set tail elements to 1s */
+    vext_set_elems_1s(vd, vta, vl * esz, total_elems * esz);
+}
+
+static inline void do_vext_mvv(void *vd, void *v0, void *vs1, void *vs2,
+                CPURISCVState *env, uint32_t desc,
+                opivv2_fn fn, uint32_t esz)
+{
+    uint32_t vm = vext_vm(desc);
+    uint32_t vl = env->vl;
+    uint32_t total_elems = vext_get_total_elems(env, desc, esz);
+    uint32_t vta = vext_vta(desc);
+    uint32_t vma = vext_vma(desc);
+    uint32_t i;
+
+    VSTART_CHECK_EARLY_EXIT(env, vl);
+
+    for (i = env->vstart; i < vl; i++) {
+        if (!vm && !vext_elem_mask(v0, i)) {
+            /* set masked-off elements to 1s */
+            vext_set_elems_1s(vd, vma, i * esz, (i + 1) * esz);
+            continue;
+        }
+        fn(vd, vs1, vs2, i);
+    }
+    env->vstart = 0;
+    /* set tail elements to 1s */
+    vext_set_elems_1s(vd, vta, vl * esz, total_elems * esz);
+}
+
+#define OPMVV2(NAME, TD, T1, T2, TX1, TX2, HD, HS1, HS2)    \
+static void do_##NAME(void *vd, void *vs1, void *vs2,       \
+                        int i)                              \
+{                                                           \
+    T1 s1 = *((T1 *)vs1 + HS1(i));                          \
+    T2 s2 = *((T2 *)vs2 + HS2(i));                          \
+    TX1 b1;                                                 \
+    TX2 b2;                                                 \
+    TD res = 0;                                             \
+    for (int byte = 0; byte < 4; byte++) {                  \
+        b1 = (TX1)(s1 >> (byte * 8));                       \
+        b2 = (TX2)(s2 >> (byte * 8));                       \
+        res += (TD)b1 * (TD)b2;                             \
+    }                                                       \
+    *((TD *)vd + HD(i)) += res;                             \
+}
+
+#define OPMVX2(NAME, TD, T1, T2, TX1, TX2, HD, HS2)     \
+static void do_##NAME(void *vd, target_ulong rs1,       \
+                      void *vs2, int i)                 \
+{                                                       \
+    T1 s1 = (T1)rs1;                                    \
+    T2 s2 = *((T2 *)vs2 + HS2(i));                      \
+    TX1 b1;                                             \
+    TX2 b2;                                             \
+    TD res = 0;                                         \
+    for (int byte = 0; byte < 4; byte++) {              \
+        b1 = (TX1)(s1 >> (byte * 8));                   \
+        b2 = (TX2)(s2 >> (byte * 8));                   \
+        res += (TD)b1 * (TD)b2;                         \
+    }                                                   \
+    *((TD *)vd + HD(i)) += res;                         \
+}
+
+#define GEN_VEXT_MVV(NAME, ESZ)                           \
+void HELPER(NAME)(void *vd, void *v0, void *vs1,          \
+                  void *vs2, CPURISCVState *env,          \
+                  uint32_t desc)                          \
+{                                                         \
+    do_vext_mvv(vd, v0, vs1, vs2, env, desc,              \
+                do_##NAME, ESZ);                          \
+}
+
+#define GEN_VEXT_MVX(NAME, ESZ)                           \
+void HELPER(NAME)(void *vd, void *v0, target_ulong s1,    \
+                  void *vs2, CPURISCVState *env,          \
+                  uint32_t desc)                          \
+{                                                         \
+    do_vext_mvx(vd, v0, s1, vs2, env, desc,               \
+                do_##NAME, ESZ);                          \
+}
+
+RVVCALL(OPMVX2, tt_vqdot_vx, int32_t, int32_t, int32_t, int8_t, int8_t, H4, H4)
+RVVCALL(OPMVX2, tt_vqdotu_vx, uint32_t, uint32_t, uint32_t, uint8_t, uint8_t, H4, H4)
+RVVCALL(OPMVX2, tt_vqdotsu_vx, int32_t, uint32_t, int32_t, uint8_t, int8_t, H4, H4)
+RVVCALL(OPMVX2, tt_vqdotus_vx, int32_t, int32_t, uint32_t, int8_t, uint8_t, H4, H4)
+RVVCALL(OPMVV2, tt_vqdot_vv, int32_t, int32_t, int32_t, int8_t, int8_t, H4, H4, H4)
+RVVCALL(OPMVV2, tt_vqdotu_vv, uint32_t, uint32_t, uint32_t, uint8_t, uint8_t, H4, H4, H4)
+RVVCALL(OPMVV2, tt_vqdotsu_vv, int32_t, uint32_t, int32_t, uint8_t, int8_t, H4, H4, H4)
+
+GEN_VEXT_MVX(tt_vqdot_vx, 4)
+GEN_VEXT_MVX(tt_vqdotu_vx, 4)
+GEN_VEXT_MVX(tt_vqdotsu_vx, 4)
+GEN_VEXT_MVX(tt_vqdotus_vx, 4)
+GEN_VEXT_MVV(tt_vqdot_vv, 4)
+GEN_VEXT_MVV(tt_vqdotu_vv, 4)
+GEN_VEXT_MVV(tt_vqdotsu_vv, 4)
 
 static int8_t do_mulh_b(int8_t s2, int8_t s1)
 {

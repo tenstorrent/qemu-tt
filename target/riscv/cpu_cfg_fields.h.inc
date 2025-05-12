@@ -115,6 +115,7 @@ BOOL_FIELD(ext_smnpm)
 BOOL_FIELD(ext_smmpm)
 BOOL_FIELD(ext_sspm)
 BOOL_FIELD(ext_supm)
+BOOL_FIELD(ext_xttvqdotq);
 BOOL_FIELD(rvv_ta_all_1s)
 BOOL_FIELD(rvv_ma_all_1s)
 BOOL_FIELD(rvv_vl_half_avl)

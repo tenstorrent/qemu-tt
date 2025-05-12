@@ -255,6 +255,7 @@ const RISCVIsaExtData isa_edata_arr[] = {
     ISA_EXT_DATA_ENTRY(xmipscbop, PRIV_VERSION_1_12_0, ext_xmipscbop),
     ISA_EXT_DATA_ENTRY(xmipscmov, PRIV_VERSION_1_12_0, ext_xmipscmov),
     ISA_EXT_DATA_ENTRY(xmipslsp, PRIV_VERSION_1_12_0, ext_xmipslsp),
+    ISA_EXT_DATA_ENTRY(xttvqdotq, PRIV_VERSION_1_12_0, ext_xttvqdotq),
     ISA_EXT_DATA_ENTRY(xtheadba, PRIV_VERSION_1_11_0, ext_xtheadba),
     ISA_EXT_DATA_ENTRY(xtheadbb, PRIV_VERSION_1_11_0, ext_xtheadbb),
     ISA_EXT_DATA_ENTRY(xtheadbs, PRIV_VERSION_1_11_0, ext_xtheadbs),
@@ -1348,6 +1349,7 @@ const RISCVCPUMultiExtConfig riscv_cpu_extensions[] = {
 };
 
 const RISCVCPUMultiExtConfig riscv_cpu_vendor_exts[] = {
+    MULTI_EXT_CFG_BOOL("xttvqdotq", ext_xttvqdotq, false),
     MULTI_EXT_CFG_BOOL("xtheadba", ext_xtheadba, false),
     MULTI_EXT_CFG_BOOL("xtheadbb", ext_xtheadbb, false),
     MULTI_EXT_CFG_BOOL("xtheadbs", ext_xtheadbs, false),
@@ -3185,6 +3187,7 @@ static const TypeInfo riscv_cpu_type_infos[] = {
         .cfg.ext_svinval = true,
         .cfg.ext_svnapot = true,
         .cfg.ext_svpbmt = true,
+        .cfg.ext_xttvqdotq = true,
 
         .cfg.mvendorid = TENSTORRENT_VENDOR_ID,
         .cfg.marchid = 0x0000000001010101, /* From Whsiper, TODO: Get better value */

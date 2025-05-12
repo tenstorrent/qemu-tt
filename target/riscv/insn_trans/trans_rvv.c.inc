@@ -1867,6 +1867,155 @@ static bool opivx_vmadc_check(DisasContext *s, arg_rmrr *a)
 GEN_OPIVX_TRANS(vmadc_vxm, opivx_vmadc_check)
 GEN_OPIVX_TRANS(vmsbc_vxm, opivx_vmadc_check)
 
+typedef void gen_helper_opmvx(TCGv_ptr, TCGv_ptr, TCGv, TCGv_ptr,
+                              TCGv_env, TCGv_i32);
+typedef void gen_helper_opmvv(TCGv_ptr, TCGv_ptr, TCGv_ptr, TCGv_ptr,
+                              TCGv_env, TCGv_i32);
+
+static bool opmvv_trans(uint32_t vd, uint32_t vs1, uint32_t vs2,
+                        uint32_t data, gen_helper_opmvv *fn, DisasContext *s)
+{
+    TCGv_ptr dest, src1, src2, mask;
+    TCGv_i32 desc;
+
+    dest = tcg_temp_new_ptr();
+    src1 = tcg_temp_new_ptr();
+    src2 = tcg_temp_new_ptr();
+    mask = tcg_temp_new_ptr();
+
+    tcg_gen_addi_ptr(dest, tcg_env, vreg_ofs(s, vd));
+    tcg_gen_addi_ptr(src1, tcg_env, vreg_ofs(s, vs1));
+    tcg_gen_addi_ptr(src2, tcg_env, vreg_ofs(s, vs2));
+    tcg_gen_addi_ptr(mask, tcg_env, vreg_ofs(s, 0));
+
+    desc = tcg_constant_i32(simd_desc(s->cfg_ptr->vlenb,
+                                        s->cfg_ptr->vlenb, data));
+    fn(dest, mask, src1, src2, tcg_env, desc);
+
+    finalize_rvv_inst(s);
+    return true;
+}
+
+static bool opmvx_trans(uint32_t vd, uint32_t rs1, uint32_t vs2,
+                        uint32_t data, gen_helper_opmvx *fn, DisasContext *s,
+                        DisasExtend ext)
+{
+    TCGv_ptr dest, src2, mask;
+    TCGv_i32 desc;
+    TCGv src1;
+
+    dest = tcg_temp_new_ptr();
+    src2 = tcg_temp_new_ptr();
+    mask = tcg_temp_new_ptr();
+    src1 = get_gpr(s, rs1, ext);
+
+    tcg_gen_addi_ptr(dest, tcg_env, vreg_ofs(s, vd));
+    tcg_gen_addi_ptr(src2, tcg_env, vreg_ofs(s, vs2));
+    tcg_gen_addi_ptr(mask, tcg_env, vreg_ofs(s, 0));
+
+    desc = tcg_constant_i32(simd_desc(s->cfg_ptr->vlenb,
+                                        s->cfg_ptr->vlenb, data));
+    fn(dest, mask, src1, src2, tcg_env, desc);
+
+    finalize_rvv_inst(s);
+    return true;
+}
+
+static inline float get_actual_lmul(int8_t lmul) {
+    switch (lmul) {
+        case 0: return 1.0f;
+        case 1: return 2.0f;
+        case 2: return 4.0f;
+        case 3: return 8.0f;
+        case -3: return 1.0f/8.0f;
+        case -2: return 1.0f/4.0f;
+        case -1: return 1.0f/2.0f;
+        default: return 0.0f; // Invalid case
+    }
+}
+
+static inline uint8_t get_actual_sew(uint8_t sew) {
+    switch (sew) {
+        case 0: return 8;
+        case 1: return 16;
+        case 2: return 32;
+        case 3: return 64;
+        default: return 0; // Invalid case
+    }
+}
+
+/* This check conforms to the specification in Section 2.1.
+ * "Fractional values of LMUL that result in LMUL*VLEN < SEW are not supported
+ * and cause an illegal instruction exception."
+ * "These instructions are only defined for SEW=32."
+ *
+ * Vector-Scalar VX instructions read from integer register rs1, so we do not
+ * need to check for vs1 alignment.
+ */
+static bool vqdot_vx_check(DisasContext *s, arg_rmrr *a)
+{
+    return require_rvv(s) &&
+            vext_check_isa_ill(s) &&
+            require_align(a->rd, s->lmul) &&
+            require_align(a->rs2, s->lmul) &&
+            s->sew == MO_32 &&
+            get_actual_lmul(s->lmul) * s->cfg_ptr->vlenb >= get_actual_sew(s->sew) &&
+            s->cfg_ptr->ext_xttvqdotq;
+}
+
+static bool vqdot_vv_check(DisasContext *s, arg_rmrr *a)
+{
+    bool ret = require_rvv(s) &&
+            vext_check_isa_ill(s) &&
+            require_align(a->rd, s->lmul) &&
+            require_align(a->rs1, s->lmul) &&
+            require_align(a->rs2, s->lmul) &&
+            s->sew == MO_32 &&
+            get_actual_lmul(s->lmul) * s->cfg_ptr->vlenb >= get_actual_sew(s->sew) &&
+            s->cfg_ptr->ext_xttvqdotq;
+    return ret;
+}
+
+#define GEN_OPMVX_TRANS(NAME, CHECK, EXT)                                \
+static bool trans_##NAME(DisasContext *s, arg_rmrr *a)                   \
+{                                                                        \
+    if (CHECK(s, a)) {                                                   \
+        static gen_helper_opmvx * const fn = gen_helper_##NAME;          \
+        uint32_t data = 0;                                               \
+        data = FIELD_DP32(data, VDATA, VM, a->vm);                       \
+        data = FIELD_DP32(data, VDATA, LMUL, s->lmul);                   \
+        data = FIELD_DP32(data, VDATA, VTA, s->vta);                     \
+        data = FIELD_DP32(data, VDATA, VTA_ALL_1S, s->cfg_vta_all_1s);   \
+        data = FIELD_DP32(data, VDATA, VMA, s->vma);                     \
+        return opmvx_trans(a->rd, a->rs1, a->rs2, data, fn, s, EXT);     \
+    }                                                                    \
+    return false;                                                        \
+}
+
+#define GEN_OPMVV_TRANS(NAME, CHECK)                                     \
+static bool trans_##NAME(DisasContext *s, arg_rmrr *a)                   \
+{                                                                        \
+    if (CHECK(s, a)) {                                                   \
+        static gen_helper_opmvv * const fn = gen_helper_##NAME;          \
+        uint32_t data = 0;                                               \
+        data = FIELD_DP32(data, VDATA, VM, a->vm);                       \
+        data = FIELD_DP32(data, VDATA, LMUL, s->lmul);                   \
+        data = FIELD_DP32(data, VDATA, VTA, s->vta);                     \
+        data = FIELD_DP32(data, VDATA, VTA_ALL_1S, s->cfg_vta_all_1s);   \
+        data = FIELD_DP32(data, VDATA, VMA, s->vma);                     \
+        return opmvv_trans(a->rd, a->rs1, a->rs2, data, fn, s);          \
+    }                                                                    \
+    return false;                                                        \
+}
+
+GEN_OPMVX_TRANS(tt_vqdot_vx, vqdot_vx_check, EXT_SIGN)
+GEN_OPMVX_TRANS(tt_vqdotu_vx, vqdot_vx_check, EXT_ZERO)
+GEN_OPMVX_TRANS(tt_vqdotsu_vx, vqdot_vx_check, EXT_ZERO)
+GEN_OPMVX_TRANS(tt_vqdotus_vx, vqdot_vx_check, EXT_SIGN)
+GEN_OPMVV_TRANS(tt_vqdot_vv, vqdot_vv_check)
+GEN_OPMVV_TRANS(tt_vqdotu_vv, vqdot_vv_check)
+GEN_OPMVV_TRANS(tt_vqdotsu_vv, vqdot_vv_check)
+
 /* OPIVI without GVEC IR */
 #define GEN_OPIVI_TRANS(NAME, IMM_MODE, OPIVX, CHECK)                    \
 static bool trans_##NAME(DisasContext *s, arg_rmrr *a)                   \
