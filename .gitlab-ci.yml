@@ -1,24 +1,36 @@
-#
-# This is the GitLab CI configuration file for the mainstream QEMU
-# project: https://gitlab.com/qemu-project/qemu/-/pipelines
-#
-# !!! DO NOT ADD ANY NEW CONFIGURATION TO THIS FILE !!!
-#
-# Only documentation or comments is accepted.
-#
-# To use a different set of jobs than the mainstream QEMU project,
-# you need to set the location of your custom yml file at "custom CI/CD
-# configuration path", on your GitLab CI namespace:
-# https://docs.gitlab.com/ee/ci/pipelines/settings.html#custom-cicd-configuration-path
-#
-# ----------------------------------------------------------------------
-#
-# QEMU CI jobs are based on templates. Some templates provide
-# user-configurable options, modifiable via configuration variables.
-#
-# See https://qemu-project.gitlab.io/qemu/devel/ci.html#custom-ci-cd-variables
-# for more information.
-#
+stages:
+- build
 
-include:
-  - local: '/.gitlab-ci.d/qemu-project.yml'
+default:
+  image: ubuntu:24.04
+  tags:
+    - 8-core
+
+# This does two things.
+# 1) Ensures all jobs are run for merge requests
+# 2) Prevents there being a pipeline triggered for a branch
+#    when there is an open merge request (a wasted double up)
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+build:
+  stage: build
+  image: $BUILD_IMAGE
+  script:
+    - DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -qq eatmydata
+    - DEBIAN_FRONTEND=noninteractive eatmydata apt-get install --no-install-recommends -qq bison ccache flex gcc git libc6-dev libfdt-dev libglib2.0-dev libgnutls28-dev libpixman-1-dev make ninja-build pkgconf python3 python3-venv python3-pip bzip2 python3-tomli
+    - ./configure --target-list=riscv32-linux-user,riscv64-linux-user,riscv64-softmmu,riscv32-softmmu --disable-werror --disable-nettle
+    - make -j $(nproc)
+  parallel:
+    matrix:
+      - BUILD_IMAGE: ['ubuntu:22.04', 'ubuntu:24.04', 'ubuntu:25.10', 'debian:stable']
+  artifacts:
+    paths:
+      - build/qemu-system-riscv64
+      - build/qemu-system-riscv32
+      - build/qemu-riscv64
+      - build/qemu-riscv32
