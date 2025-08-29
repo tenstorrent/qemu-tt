@@ -19,6 +19,11 @@ test-fcvtmod: CFLAGS += -march=rv64imafdc
 test-fcvtmod: LDFLAGS += -static
 run-test-fcvtmod: QEMU_OPTS += -cpu rv64,d=true,zfa=true
 
+# Test signal handling.
+TESTS += test-signal-handling
+test-signal-handling: CFLAGS += -march=rv64gc
+run-test-signal-handling: QEMU_OPTS += -cpu rv64
+
 # Test for vstart >= vl
 TESTS += test-vstart-overflow
 test-vstart-overflow: CFLAGS += -march=rv64gcv
@@ -28,3 +33,4 @@ run-test-vstart-overflow: QEMU_OPTS += -cpu rv64,v=on
 TESTS += test-interrupted-v
 test-interrupted-v: CFLAGS += -march=rv64gcv
 run-test-interrupted-v: QEMU_OPTS += -cpu rv64,v=on
+
