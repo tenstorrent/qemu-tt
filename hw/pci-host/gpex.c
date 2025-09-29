@@ -91,8 +91,10 @@ static void gpex_host_realize(DeviceState *dev, Error **errp)
 {
     PCIHostState *pci = PCI_HOST_BRIDGE(dev);
     GPEXHost *s = GPEX_HOST(dev);
+    Object *o = OBJECT(s);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     PCIExpressHost *pex = PCIE_HOST_BRIDGE(dev);
+    char name[32];
     int i;
 
     s->irq = g_malloc0_n(s->num_irqs, sizeof(*s->irq));
@@ -123,16 +125,20 @@ static void gpex_host_realize(DeviceState *dev, Error **errp)
      * the 'background' behaviour and which hold the real PCI MRs as
      * subregions.
      */
-    memory_region_init(&s->io_mmio, OBJECT(s), "gpex_mmio", UINT64_MAX);
-    memory_region_init(&s->io_ioport, OBJECT(s), "gpex_ioport", 64 * 1024);
+    snprintf(name, sizeof(name), "pcie.%d.mmio", s->instance_id);
+    memory_region_init(&s->io_mmio, o, name, UINT64_MAX);
+    snprintf(name, sizeof(name), "pcie.%d.ioport", s->instance_id);
+    memory_region_init(&s->io_ioport, o, name, 64 * 1024);
 
     if (s->allow_unmapped_accesses) {
-        memory_region_init_io(&s->io_mmio_window, OBJECT(s),
-                              &unassigned_io_ops, OBJECT(s),
-                              "gpex_mmio_window", UINT64_MAX);
-        memory_region_init_io(&s->io_ioport_window, OBJECT(s),
-                              &unassigned_io_ops, OBJECT(s),
-                              "gpex_ioport_window", 64 * 1024);
+        snprintf(name, sizeof(name), "pcie.%d.mmio.window", s->instance_id);
+        memory_region_init_io(&s->io_mmio_window, o,
+                              &unassigned_io_ops, o,
+                              name, UINT64_MAX);
+        snprintf(name, sizeof(name), "pcie.%d.ioport.window", s->instance_id);
+        memory_region_init_io(&s->io_ioport_window, o,
+                              &unassigned_io_ops, o,
+                              name, 64 * 1024);
 
         memory_region_add_subregion(&s->io_mmio_window, 0, &s->io_mmio);
         memory_region_add_subregion(&s->io_ioport_window, 0, &s->io_ioport);
@@ -148,7 +154,8 @@ static void gpex_host_realize(DeviceState *dev, Error **errp)
         s->irq[i].irq_num = -1;
     }
 
-    pci->bus = pci_register_root_bus(dev, "pcie.0", gpex_set_irq,
+    snprintf(name, sizeof(name), "pcie.%d", s->instance_id);
+    pci->bus = pci_register_root_bus(dev, name, gpex_set_irq,
                                      gpex_swizzle_map_irq_fn,
                                      s, &s->io_mmio, &s->io_ioport, 0,
                                      s->num_irqs, TYPE_PCIE_BUS);
@@ -167,7 +174,16 @@ static void gpex_host_unrealize(DeviceState *dev)
 static const char *gpex_host_root_bus_path(PCIHostState *host_bridge,
                                           PCIBus *rootbus)
 {
-    return "0000:00";
+    GPEXHost *s = GPEX_HOST(host_bridge);
+    if (s->instance_id == 0) {
+        return "0000:00";
+    } else if (s->instance_id == 1) {
+        return "0001:00";
+    } else if (s->instance_id == 2) {
+        return "0002:00";
+    } else {
+        g_assert_not_reached();
+    }
 }
 
 static const Property gpex_host_properties[] = {
@@ -190,6 +206,7 @@ static const Property gpex_host_properties[] = {
     DEFINE_PROP_SIZE(PCI_HOST_ABOVE_4G_MMIO_SIZE, GPEXHost,
                      gpex_cfg.mmio64.size, 0),
     DEFINE_PROP_UINT8("num-irqs", GPEXHost, num_irqs, PCI_NUM_PINS),
+    DEFINE_PROP_INT32("instance-id", GPEXHost, instance_id, 0),
 };
 
 static void gpex_host_class_init(ObjectClass *klass, const void *data)
@@ -209,8 +226,10 @@ static void gpex_host_initfn(Object *obj)
 {
     GPEXHost *s = GPEX_HOST(obj);
     GPEXRootState *root = &s->gpex_root;
+    char name[16];
 
-    object_initialize_child(obj, "gpex_root", root, TYPE_GPEX_ROOT_DEVICE);
+    snprintf(name, sizeof(name), "pcie.%d.root", s->instance_id);
+    object_initialize_child(obj, name, root, TYPE_GPEX_ROOT_DEVICE);
     qdev_prop_set_int32(DEVICE(root), "addr", PCI_DEVFN(0, 0));
     qdev_prop_set_bit(DEVICE(root), "multifunction", false);
 }

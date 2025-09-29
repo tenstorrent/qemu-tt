@@ -54,6 +54,8 @@ struct GPEXHost {
     PCIExpressHost parent_obj;
     /*< public >*/
 
+    int instance_id;
+
     GPEXRootState gpex_root;
 
     MemoryRegion io_ioport;
