@@ -3192,6 +3192,8 @@ static const TypeInfo riscv_cpu_type_infos[] = {
         .cfg.ext_svnapot = true,
         .cfg.ext_svpbmt = true,
 
+        .cfg.mvendorid = TENSTORRENT_VENDOR_ID,
+
         .cfg.max_satp_mode = VM_1_10_SV57,
     ),
 
