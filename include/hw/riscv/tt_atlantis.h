@@ -18,6 +18,7 @@
 #define TYPE_TT_ATLANTIS_MACHINE MACHINE_TYPE_NAME("tt-atlantis")
 OBJECT_DECLARE_SIMPLE_TYPE(TTAtlantisState, TT_ATLANTIS_MACHINE)
 
+#define TT_ATL_NUM_PCI 3
 #define TT_ATL_NUM_I2C 5
 
 struct TTAtlantisState {
@@ -32,7 +33,7 @@ struct TTAtlantisState {
 
     RISCVHartArrayState soc;
     DeviceState *irqchip;
-    GPEXHost gpex_host;
+    GPEXHost gpex_host[TT_ATL_NUM_PCI];
     DesignWareI2CState i2c[TT_ATL_NUM_I2C];
 
     int fdt_size;
@@ -52,6 +53,8 @@ enum {
     TT_ATL_UART3_IRQ = 41,
     TT_ATL_UART4_IRQ = 42,
     TT_ATL_PCIE0_INTA_IRQ = 96,
+    TT_ATL_PCIE1_INTA_IRQ = 106,
+    TT_ATL_PCIE2_INTA_IRQ = 116,
 };
 
 enum {

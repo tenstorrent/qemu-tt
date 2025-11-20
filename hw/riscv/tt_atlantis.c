@@ -85,7 +85,13 @@ static const MemMapEntry tt_atlantis_memmap[] = {
     [TT_ATL_PCIE_MMIO0_32] = { 0x10004000000,     0x4000000 }, /* qemu only */
     [TT_ATL_PCIE_MMIO0_64] = { 0x10010000000, 0x0fff0000000 }, /* qemu only */
     [TT_ATL_PCIE_MMIO1] =    { 0x20000000000, 0x10000000000 },
+    [TT_ATL_PCIE_PIO1] =     { 0x20000000000,       0x01000 }, /* qemu only */
+    [TT_ATL_PCIE_MMIO1_32] = { 0x20004000000,     0x4000000 }, /* qemu only */
+    [TT_ATL_PCIE_MMIO1_64] = { 0x20010000000, 0x0fff0000000 }, /* qemu only */
     [TT_ATL_PCIE_MMIO2] =    { 0x30000000000, 0x10000000000 },
+    [TT_ATL_PCIE_PIO2]  =    { 0x30000000000,       0x01000 }, /* qemu only */
+    [TT_ATL_PCIE_MMIO2_32] = { 0x30004000000,     0x4000000 }, /* qemu only */
+    [TT_ATL_PCIE_MMIO2_64] = { 0x30010000000, 0x0fff0000000 }, /* qemu only */
 };
 
 static uint32_t next_phandle(void)
@@ -387,7 +393,7 @@ static void create_fdt_cpu(TTAtlantisState *s, const MemMapEntry *memmap,
                          IRQ_S_EXT, s->soc.num_harts);
 }
 
-static void create_fdt_pcie(void *fdt,
+static void create_fdt_pcie(void *fdt, int instance_id,
                             const MemMapEntry *mem_ecam,
                             const MemMapEntry *mem_pio,
                             const MemMapEntry *mem_mmio32,
@@ -404,6 +410,7 @@ static void create_fdt_pcie(void *fdt,
     qemu_fdt_setprop_cell(fdt, name, "#size-cells", 0x2);
     qemu_fdt_setprop_string(fdt, name, "compatible", "pci-host-ecam-generic");
     qemu_fdt_setprop_string(fdt, name, "device_type", "pci");
+    qemu_fdt_setprop_cell(fdt, name, "linux,pci-domain", instance_id);
     qemu_fdt_setprop_cells(fdt, name, "bus-range", 0,
                            mem_ecam->size / PCIE_MMCFG_SIZE_MIN - 1);
     qemu_fdt_setprop(fdt, name, "dma-coherent", NULL, 0);
@@ -527,12 +534,26 @@ static void finalize_fdt(TTAtlantisState *s)
      *                       aplic_s_phandle);
      */
 
-    create_fdt_pcie(fdt,
+    create_fdt_pcie(fdt, 0,
                     &s->memmap[TT_ATL_PCIE_ECAM0],
                     &s->memmap[TT_ATL_PCIE_PIO0],
                     &s->memmap[TT_ATL_PCIE_MMIO0_32],
                     &s->memmap[TT_ATL_PCIE_MMIO0_64],
                     TT_ATL_PCIE0_INTA_IRQ,
+                    aplic_s_phandle, imsic_s_phandle);
+    create_fdt_pcie(fdt, 1,
+                    &s->memmap[TT_ATL_PCIE_ECAM1],
+                    &s->memmap[TT_ATL_PCIE_PIO1],
+                    &s->memmap[TT_ATL_PCIE_MMIO1_32],
+                    &s->memmap[TT_ATL_PCIE_MMIO1_64],
+                    TT_ATL_PCIE1_INTA_IRQ,
+                    aplic_s_phandle, imsic_s_phandle);
+    create_fdt_pcie(fdt, 2,
+                    &s->memmap[TT_ATL_PCIE_ECAM2],
+                    &s->memmap[TT_ATL_PCIE_PIO2],
+                    &s->memmap[TT_ATL_PCIE_MMIO2_32],
+                    &s->memmap[TT_ATL_PCIE_MMIO2_64],
+                    TT_ATL_PCIE2_INTA_IRQ,
                     aplic_s_phandle, imsic_s_phandle);
 
     create_fdt_reset(fdt, &s->memmap[TT_ATL_SYSCON]);
@@ -604,6 +625,7 @@ static void create_fdt(TTAtlantisState *s)
 }
 
 static void gpex_pcie_init_one(TTAtlantisState *s, GPEXHost *gpex_host,
+                               int instance_id,
                                MemoryRegion *mr,
                                const MemMapEntry *mem_ecam,
                                const MemMapEntry *mem_pio,
@@ -627,8 +649,9 @@ static void gpex_pcie_init_one(TTAtlantisState *s, GPEXHost *gpex_host,
     char name[16];
     int i;
 
-    snprintf(name, sizeof(name), "pcie");
+    snprintf(name, sizeof(name), "pcie.%d", instance_id);
     object_initialize_child(OBJECT(s), name, gpex_host, TYPE_GPEX_HOST);
+    gpex_host->instance_id = instance_id;
     dev = DEVICE(gpex_host);
     obj = OBJECT(dev);
 
@@ -649,7 +672,7 @@ static void gpex_pcie_init_one(TTAtlantisState *s, GPEXHost *gpex_host,
 
     ecam_alias = g_new0(MemoryRegion, 1);
     ecam_reg = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
-    snprintf(name, sizeof(name), "pcie.ecam");
+    snprintf(name, sizeof(name), "pcie.%d.ecam", gpex_host->instance_id);
     memory_region_init_alias(ecam_alias, obj, name,
                              ecam_reg, 0, ecam_size);
     memory_region_add_subregion(mr, ecam_base, ecam_alias);
@@ -657,13 +680,13 @@ static void gpex_pcie_init_one(TTAtlantisState *s, GPEXHost *gpex_host,
     mmio_reg = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 1);
 
     mmio32_alias = g_new0(MemoryRegion, 1);
-    snprintf(name, sizeof(name), "pcie.mmio32");
+    snprintf(name, sizeof(name), "pcie.%d.mmio32", gpex_host->instance_id);
     memory_region_init_alias(mmio32_alias, obj, name,
                              mmio_reg, mmio32_base & 0xffffffffUL, mmio32_size);
     memory_region_add_subregion(mr, mmio32_base, mmio32_alias);
 
     mmio64_alias = g_new0(MemoryRegion, 1);
-    snprintf(name, sizeof(name), "pcie.mmio64");
+    snprintf(name, sizeof(name), "pcie.%d.mmio64", gpex_host->instance_id);
     memory_region_init_alias(mmio64_alias, obj, name,
                              mmio_reg, mmio64_base, mmio64_size);
     memory_region_add_subregion(mr, mmio64_base, mmio64_alias);
@@ -682,12 +705,24 @@ static void gpex_pcie_init_one(TTAtlantisState *s, GPEXHost *gpex_host,
 
 static void gpex_pcie_init(TTAtlantisState *s, MemoryRegion *mr)
 {
-    gpex_pcie_init_one(s, &s->gpex_host, mr,
+    gpex_pcie_init_one(s, &s->gpex_host[0], 0, mr,
                        &s->memmap[TT_ATL_PCIE_ECAM0],
                        &s->memmap[TT_ATL_PCIE_PIO0],
                        &s->memmap[TT_ATL_PCIE_MMIO0_32],
                        &s->memmap[TT_ATL_PCIE_MMIO0_64],
                        TT_ATL_PCIE0_INTA_IRQ);
+    gpex_pcie_init_one(s, &s->gpex_host[1], 1, mr,
+                       &s->memmap[TT_ATL_PCIE_ECAM1],
+                       &s->memmap[TT_ATL_PCIE_PIO1],
+                       &s->memmap[TT_ATL_PCIE_MMIO1_32],
+                       &s->memmap[TT_ATL_PCIE_MMIO1_64],
+                       TT_ATL_PCIE1_INTA_IRQ);
+    gpex_pcie_init_one(s, &s->gpex_host[2], 2, mr,
+                       &s->memmap[TT_ATL_PCIE_ECAM2],
+                       &s->memmap[TT_ATL_PCIE_PIO2],
+                       &s->memmap[TT_ATL_PCIE_MMIO2_32],
+                       &s->memmap[TT_ATL_PCIE_MMIO2_64],
+                       TT_ATL_PCIE2_INTA_IRQ);
 }
 
 static DeviceState *create_reboot_device(const MemMapEntry *mem)
