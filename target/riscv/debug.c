@@ -173,7 +173,10 @@ target_ulong tselect_csr_read(CPURISCVState *env)
 
 void tselect_csr_write(CPURISCVState *env, target_ulong val)
 {
-    if (val < OLD_RV_MAX_TRIGGERS) {
+    CPUState *cs = env_cpu(env);
+    RISCVCPUClass *mcc = RISCV_CPU_GET_CLASS(cs);
+
+    if (val < mcc->def->debug_cfg->nr_triggers) {
         env->sdtrig_state.trigger_cur = val;
     }
 }

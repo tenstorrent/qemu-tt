@@ -569,6 +569,9 @@ typedef struct RISCVCSR RISCVCSR;
 typedef struct RISCVCPUDef {
     RISCVMXL misa_mxl_max;  /* max mxl for this cpu */
     RISCVCPUProfile *profile;
+#if !defined(CONFIG_USER_ONLY)
+    const RISCVSdtrigConfig *debug_cfg;
+#endif
     uint32_t misa_ext;
     int priv_spec;
     int32_t vext_spec;
