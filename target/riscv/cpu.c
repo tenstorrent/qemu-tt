@@ -2822,7 +2822,7 @@ static void riscv_cpu_class_base_init(ObjectClass *c, const void *data)
         }
         mcc->def->misa_ext |= def->misa_ext;
 #if !defined(CONFIG_USER_ONLY)
-        if (def->debug_cfg->nr_triggers) {
+        if (def->debug_cfg) {
             mcc->def->debug_cfg = def->debug_cfg;
         }
 #endif
